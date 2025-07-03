@@ -16,20 +16,23 @@ This application follows a client-server architecture:
 npm install
 ```
 
-2. Create environment file:
-```bash
-cp .env.example .env
-```
+2. Environment variables are already configured in `.env` file to work with the backend on port 5000.
 
-3. Update the `.env` file with your backend API URL:
-```
-VITE_API_URL=http://localhost:3001/api
-```
-
-4. Start the development server:
+3. Start the development server:
 ```bash
 npm run dev
 ```
+
+The frontend will run on `http://localhost:8080` and proxy API calls to `http://localhost:5000`.
+
+## Current Status
+
+⚠️ **Backend Required**: The frontend is now properly configured but requires a backend API server to function. Without the backend:
+
+- The app will load but show empty product lists
+- Authentication will not work
+- Appointments cannot be created
+- Admin panel will be empty
 
 ## Backend Requirements
 
@@ -59,7 +62,7 @@ The frontend expects a REST API backend with the following endpoints:
 
 ## Environment Variables
 
-- `VITE_API_URL` - Backend API base URL
+- `VITE_API_URL` - Backend API base URL (defaults to `/api` for proxy)
 
 ## Features
 
@@ -85,6 +88,13 @@ The frontend expects a REST API backend with the following endpoints:
 
 The application uses Vite for fast development and building. Hot module replacement is enabled for a smooth development experience.
 
+## Error Handling
+
+The frontend now gracefully handles backend connection errors:
+- Shows empty states when backend is unavailable
+- Displays user-friendly error messages
+- Prevents app crashes from API failures
+
 ## Deployment
 
 Build the application for production:
@@ -95,6 +105,14 @@ npm run build
 
 The built files will be in the `dist` directory, ready for deployment to any static hosting service.
 
-## Note
+## Next Steps
 
-This frontend application requires a separate backend API server to function properly. Make sure to set up the backend with the required endpoints and update the `VITE_API_URL` environment variable accordingly.
+To get the full application working:
+
+1. Create a Node.js/Express backend server
+2. Implement the required API endpoints
+3. Set up MongoDB database
+4. Configure authentication with JWT
+5. Start the backend server on port 5000
+
+The frontend is now ready and will automatically connect to the backend once it's available.

@@ -1,14 +1,8 @@
 import { AuthResponse, AuthUser, CartItem } from '@/types/database';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export class DatabaseService {
-  // Initialize database connection - now just a placeholder for frontend
-  static async init() {
-    // No longer needed on frontend - backend handles initialization
-    console.log('DatabaseService initialized for frontend API calls');
-  }
-
   // Helper method to make API requests
   private static async apiRequest(endpoint: string, options: RequestInit = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
@@ -112,7 +106,8 @@ export class DatabaseService {
       return await this.apiRequest(endpoint);
     } catch (error) {
       console.error('Error fetching products:', error);
-      throw new Error('Failed to fetch products');
+      // Return empty array instead of throwing to prevent app crashes
+      return [];
     }
   }
 
@@ -196,7 +191,8 @@ export class DatabaseService {
       return await this.apiRequest(`/appointments/user/${userId}`);
     } catch (error) {
       console.error('Error fetching user appointments:', error);
-      throw new Error('Failed to fetch appointments');
+      // Return empty array instead of throwing to prevent app crashes
+      return [];
     }
   }
 
@@ -205,7 +201,8 @@ export class DatabaseService {
       return await this.apiRequest('/appointments');
     } catch (error) {
       console.error('Error fetching all appointments:', error);
-      throw new Error('Failed to fetch appointments');
+      // Return empty array instead of throwing to prevent app crashes
+      return [];
     }
   }
 
