@@ -1,16 +1,25 @@
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import connectToDatabase from '@/lib/mongodb';
-import User, { IUser } from '@/models/User';
-import Product, { IProduct } from '@/models/Product';
-import Appointment, { IAppointment } from '@/models/Appointment';
 import { AuthResponse, AuthUser, CartItem } from '@/types/database';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
-
 export class DatabaseService {
-  static async init() {
-    await connectToDatabase();
+  private static baseUrl = '/api'; // This would be your backend API URL
+
+  // Helper method for making API requests
+  private static async makeRequest(endpoint: string, options: RequestInit = {}) {
+    const url = `${this.baseUrl}${endpoint}`;
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+      ...options,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Network error' }));
+      throw new Error(error.message || 'Request failed');
+    }
+
+    return response.json();
   }
 
   // Auth Methods
@@ -21,90 +30,37 @@ export class DatabaseService {
     lastName?: string;
     username?: string;
   }): Promise<AuthResponse> {
-    await this.init();
-    
-    const existingUser = await User.findOne({ email: userData.email });
-    if (existingUser) {
-      throw new Error('User already exists with this email');
-    }
-
-    if (userData.username) {
-      const existingUsername = await User.findOne({ username: userData.username });
-      if (existingUsername) {
-        throw new Error('Username already taken');
-      }
-    }
-
-    const hashedPassword = await bcrypt.hash(userData.password, 12);
-    
-    const user = new User({
-      ...userData,
-      password: hashedPassword,
+    return this.makeRequest('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify(userData),
     });
-
-    await user.save();
-
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-    
-    return {
-      user: this.formatUser(user),
-      token,
-    };
   }
 
   static async signIn(emailOrUsername: string, password: string): Promise<AuthResponse> {
-    await this.init();
-    
-    const user = await User.findOne({
-      $or: [
-        { email: emailOrUsername.toLowerCase() },
-        { username: emailOrUsername }
-      ]
+    return this.makeRequest('/auth/signin', {
+      method: 'POST',
+      body: JSON.stringify({ emailOrUsername, password }),
     });
-
-    if (!user) {
-      throw new Error('Invalid credentials');
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
-      throw new Error('Invalid credentials');
-    }
-
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
-    
-    return {
-      user: this.formatUser(user),
-      token,
-    };
   }
 
   static async getUserById(userId: string): Promise<AuthUser | null> {
-    await this.init();
-    
-    const user = await User.findById(userId);
-    return user ? this.formatUser(user) : null;
-  }
-
-  static async verifyToken(token: string): Promise<AuthUser | null> {
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-      return await this.getUserById(decoded.userId);
+      return await this.makeRequest(`/users/${userId}`);
     } catch (error) {
       return null;
     }
   }
 
-  private static formatUser(user: IUser): AuthUser {
-    return {
-      _id: user._id.toString(),
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      username: user.username,
-      phone: user.phone,
-      isAdmin: user.isAdmin,
-    };
+  static async verifyToken(token: string): Promise<AuthUser | null> {
+    try {
+      return await this.makeRequest('/auth/verify', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+    } catch (error) {
+      return null;
+    }
   }
 
   // Product Methods
@@ -115,26 +71,22 @@ export class DatabaseService {
     minPrice?: number;
     maxPrice?: number;
   }) {
-    await this.init();
+    const queryParams = new URLSearchParams();
     
-    const query: any = {};
-    
-    if (filters?.category) query.category = filters.category;
-    if (filters?.isActive !== undefined) query.isActive = filters.isActive;
-    if (filters?.isFeatured !== undefined) query.isFeatured = filters.isFeatured;
-    
-    if (filters?.minPrice !== undefined || filters?.maxPrice !== undefined) {
-      query.price = {};
-      if (filters.minPrice !== undefined) query.price.$gte = filters.minPrice;
-      if (filters.maxPrice !== undefined) query.price.$lte = filters.maxPrice;
+    if (filters) {
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined) {
+          queryParams.append(key, value.toString());
+        }
+      });
     }
 
-    return await Product.find(query).sort({ createdAt: -1 });
+    const endpoint = `/products${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+    return this.makeRequest(endpoint);
   }
 
   static async getProductById(productId: string) {
-    await this.init();
-    return await Product.findById(productId);
+    return this.makeRequest(`/products/${productId}`);
   }
 
   static async createProduct(productData: {
@@ -147,26 +99,23 @@ export class DatabaseService {
     isActive?: boolean;
     isFeatured?: boolean;
   }) {
-    await this.init();
-    
-    const product = new Product(productData);
-    return await product.save();
+    return this.makeRequest('/products', {
+      method: 'POST',
+      body: JSON.stringify(productData),
+    });
   }
 
-  static async updateProduct(productId: string, updateData: Partial<IProduct>) {
-    await this.init();
-    
-    return await Product.findByIdAndUpdate(
-      productId,
-      updateData,
-      { new: true, runValidators: true }
-    );
+  static async updateProduct(productId: string, updateData: any) {
+    return this.makeRequest(`/products/${productId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updateData),
+    });
   }
 
   static async deleteProduct(productId: string) {
-    await this.init();
-    
-    return await Product.findByIdAndDelete(productId);
+    return this.makeRequest(`/products/${productId}`, {
+      method: 'DELETE',
+    });
   }
 
   // Appointment Methods
@@ -180,102 +129,35 @@ export class DatabaseService {
     cartItems: CartItem[];
     totalAmount: number;
   }) {
-    await this.init();
-    
-    const appointment = new Appointment(appointmentData);
-    return await appointment.save();
+    return this.makeRequest('/appointments', {
+      method: 'POST',
+      body: JSON.stringify(appointmentData),
+    });
   }
 
   static async getAppointmentsByUserId(userId: string) {
-    await this.init();
-    
-    return await Appointment.find({ userId })
-      .sort({ appointmentDate: -1 })
-      .populate('userId', 'email firstName lastName');
+    return this.makeRequest(`/appointments/user/${userId}`);
   }
 
   static async getAllAppointments() {
-    await this.init();
-    
-    return await Appointment.find()
-      .sort({ appointmentDate: -1 })
-      .populate('userId', 'email firstName lastName');
+    return this.makeRequest('/appointments');
   }
 
   static async updateAppointmentStatus(appointmentId: string, status: string) {
-    await this.init();
-    
-    return await Appointment.findByIdAndUpdate(
-      appointmentId,
-      { status },
-      { new: true }
-    );
+    return this.makeRequest(`/appointments/${appointmentId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
   }
 
   static async getAppointmentById(appointmentId: string) {
-    await this.init();
-    
-    return await Appointment.findById(appointmentId)
-      .populate('userId', 'email firstName lastName');
+    return this.makeRequest(`/appointments/${appointmentId}`);
   }
 
-  // Utility Methods
+  // Mock data for development (remove when backend is ready)
   static async seedInitialData() {
-    await this.init();
-    
-    // Create admin user if doesn't exist
-    const adminExists = await User.findOne({ isAdmin: true });
-    if (!adminExists) {
-      const hashedPassword = await bcrypt.hash('admin123', 12);
-      await User.create({
-        email: 'admin@zaffira.com',
-        password: hashedPassword,
-        firstName: 'Admin',
-        lastName: 'User',
-        username: 'admin',
-        isAdmin: true,
-      });
-      console.log('Admin user created: admin@zaffira.com / admin123');
-    }
-
-    // Add sample products if none exist
-    const productCount = await Product.countDocuments();
-    if (productCount === 0) {
-      const sampleProducts = [
-        {
-          name: 'Diamond Engagement Ring',
-          description: 'Beautiful diamond engagement ring with platinum setting',
-          price: 45000,
-          category: 'rings',
-          imageUrl: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
-          stockQuantity: 5,
-          isActive: true,
-          isFeatured: true,
-        },
-        {
-          name: 'Gold Chain Necklace',
-          description: 'Elegant 18k gold chain necklace',
-          price: 25000,
-          category: 'necklaces',
-          imageUrl: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
-          stockQuantity: 10,
-          isActive: true,
-          isFeatured: true,
-        },
-        {
-          name: 'Pearl Earrings',
-          description: 'Classic pearl drop earrings',
-          price: 8000,
-          category: 'earrings',
-          imageUrl: 'https://images.unsplash.com/photo-1611652022419-a9419f74343d?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
-          stockQuantity: 15,
-          isActive: true,
-          isFeatured: true,
-        },
-      ];
-
-      await Product.insertMany(sampleProducts);
-      console.log('Sample products created');
-    }
+    // This method is now empty since seeding should be handled by the backend
+    // The backend should handle initial data seeding when it starts up
+    console.log('Data seeding should be handled by the backend API');
   }
 }
