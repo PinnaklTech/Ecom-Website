@@ -1,22 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import ProductCard from '@/components/ProductCard';
-import { supabase } from '@/integrations/supabase/client';
+import { DatabaseService } from '@/services/database';
 import { Product } from '@/types/product';
-
-interface DatabaseProduct {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  category: string;
-  image_url: string;
-  stock_quantity: number;
-  is_active: boolean;
-  is_featured: boolean;
-}
 
 const FeaturedProducts = () => {
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
@@ -24,60 +11,36 @@ const FeaturedProducts = () => {
 
   useEffect(() => {
     fetchFeaturedProducts();
-
-    // Set up real-time subscription for product changes
-    const channel = supabase
-      .channel('featured-products-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'products'
-        },
-        (payload) => {
-          console.log('Product change detected:', payload);
-          // Refetch featured products when any product changes
-          fetchFeaturedProducts();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   const fetchFeaturedProducts = async () => {
-    // Only fetch products that are explicitly marked as featured
-    const { data: featuredData, error: featuredError } = await supabase
-      .from('products')
-      .select('*')
-      .eq('is_active', true)
-      .eq('is_featured', true)
-      .order('created_at', { ascending: false });
+    try {
+      const data = await DatabaseService.getProducts({ 
+        isActive: true, 
+        isFeatured: true 
+      });
 
-    if (featuredError) {
-      console.error('Error fetching featured products:', featuredError);
-      setFeaturedProducts([]);
-    } else {
-      // Transform database products to match the expected Product interface
-      const transformedProducts: Product[] = (featuredData || []).map((dbProduct: DatabaseProduct) => ({
-        id: dbProduct.id,
+      // Transform MongoDB products to match the expected Product interface
+      const transformedProducts: Product[] = data.map((dbProduct: any) => ({
+        id: dbProduct._id.toString(),
         name: dbProduct.name,
         price: dbProduct.price,
-        image: dbProduct.image_url || '/placeholder.svg',
+        image: dbProduct.imageUrl || '/placeholder.svg',
         category: dbProduct.category as Product['category'],
         description: dbProduct.description || '',
         popularity: Math.floor(Math.random() * 100), // Random popularity since it's not in DB
         isNew: false,
-        stockQuantity: dbProduct.stock_quantity,
-        inStock: dbProduct.stock_quantity > 0,
+        stockQuantity: dbProduct.stockQuantity,
+        inStock: dbProduct.stockQuantity > 0,
       }));
       
       setFeaturedProducts(transformedProducts);
+    } catch (error) {
+      console.error('Error fetching featured products:', error);
+      setFeaturedProducts([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   if (loading) {

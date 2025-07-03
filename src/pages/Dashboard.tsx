@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { DatabaseService } from '@/services/database';
 import { useAuth } from '@/contexts/AuthContext';
 import Navigation from '@/components/Navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,53 +19,44 @@ interface CartItem {
 }
 
 interface Appointment {
-  id: string;
-  appointment_date: string;
-  cart_items: CartItem[];
+  _id: string;
+  appointmentDate: string;
+  cartItems: CartItem[];
   status: string;
-  customer_name: string;
-  customer_phone: string;
-  customer_email: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
   notes: string | null;
-  created_at: string;
-  total_amount: number;
+  createdAt: string;
+  totalAmount: number;
 }
 
 const Dashboard = () => {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
 
   const { data: appointments, isLoading, error, refetch } = useQuery({
-    queryKey: ['user-appointments', user?.id],
+    queryKey: ['user-appointments', user?._id],
     queryFn: async () => {
-      if (!user?.id) {
+      if (!user?._id) {
         return [];
       }
       
-      console.log('Fetching appointments for user:', user.id);
+      console.log('Fetching appointments for user:', user._id);
       
-      const { data, error } = await supabase
-        .from('appointments')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('appointment_date', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching user appointments:', error);
-        throw error;
-      }
+      const data = await DatabaseService.getAppointmentsByUserId(user._id);
 
       console.log('User appointments found:', data?.length || 0);
       return data as Appointment[];
     },
-    enabled: !!user?.id,
+    enabled: !!user?._id,
   });
 
   const getUserInitials = () => {
-    if (profile?.first_name && profile?.last_name) {
-      return `${profile.first_name[0]}${profile.last_name[0]}`.toUpperCase();
+    if (user?.firstName && user?.lastName) {
+      return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
     }
-    if (profile?.username) {
-      return profile.username.slice(0, 2).toUpperCase();
+    if (user?.username) {
+      return user.username.slice(0, 2).toUpperCase();
     }
     if (user?.email) {
       return user.email.slice(0, 2).toUpperCase();
@@ -139,12 +129,12 @@ const Dashboard = () => {
                     </Avatar>
                   </div>
                   <CardTitle className="text-xl font-playfair text-navy">
-                    {profile?.first_name && profile?.last_name 
-                      ? `${profile.first_name} ${profile.last_name}`
-                      : profile?.username || 'User'
+                    {user?.firstName && user?.lastName 
+                      ? `${user.firstName} ${user.lastName}`
+                      : user?.username || 'User'
                     }
                   </CardTitle>
-                  {profile?.is_admin && (
+                  {user?.isAdmin && (
                     <Badge className="bg-gold text-navy">Admin</Badge>
                   )}
                 </CardHeader>
@@ -154,17 +144,17 @@ const Dashboard = () => {
                     <span className="text-sm text-navy/80">{user?.email}</span>
                   </div>
                   
-                  {profile?.username && (
+                  {user?.username && (
                     <div className="flex items-center space-x-3">
                       <UserIcon className="h-4 w-4 text-gold" />
-                      <span className="text-sm text-navy/80">@{profile.username}</span>
+                      <span className="text-sm text-navy/80">@{user.username}</span>
                     </div>
                   )}
                   
-                  {profile?.phone && (
+                  {user?.phone && (
                     <div className="flex items-center space-x-3">
                       <Phone className="h-4 w-4 text-gold" />
-                      <span className="text-sm text-navy/80">{profile.phone}</span>
+                      <span className="text-sm text-navy/80">{user.phone}</span>
                     </div>
                   )}
 
@@ -232,22 +222,22 @@ const Dashboard = () => {
                         </TableHeader>
                         <TableBody>
                           {appointments.map((appointment) => (
-                            <TableRow key={appointment.id}>
+                            <TableRow key={appointment._id}>
                               <TableCell>
                                 <div className="space-y-1">
                                   <div className="flex items-center space-x-1 text-sm font-medium">
                                     <CalendarDays className="h-3 w-3 text-gold" />
-                                    <span>{formatDate(appointment.appointment_date)}</span>
+                                    <span>{formatDate(appointment.appointmentDate)}</span>
                                   </div>
                                   <div className="flex items-center space-x-1 text-xs text-navy/60">
                                     <Clock className="h-3 w-3 text-gold" />
-                                    <span>{formatTime(appointment.appointment_date)}</span>
+                                    <span>{formatTime(appointment.appointmentDate)}</span>
                                   </div>
                                 </div>
                               </TableCell>
                               <TableCell>
                                 <span className="font-medium text-navy">
-                                  {getServiceType(appointment.cart_items)}
+                                  {getServiceType(appointment.cartItems)}
                                 </span>
                               </TableCell>
                               <TableCell>
@@ -257,7 +247,7 @@ const Dashboard = () => {
                               </TableCell>
                               <TableCell>
                                 <span className="font-semibold text-navy">
-                                  ₹{appointment.total_amount?.toLocaleString() || '0'}
+                                  ₹{appointment.totalAmount?.toLocaleString() || '0'}
                                 </span>
                               </TableCell>
                               <TableCell>

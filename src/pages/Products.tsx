@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import Navigation from '@/components/Navigation';
 import EnhancedProductCard from '@/components/EnhancedProductCard';
@@ -8,20 +7,9 @@ import ProductsHeader from '@/components/ProductsHeader';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Filter, X } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { DatabaseService } from '@/services/database';
 import { toast } from '@/hooks/use-toast';
 import { Product } from '@/types/product';
-
-interface DatabaseProduct {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  category: string;
-  image_url: string;
-  stock_quantity: number;
-  is_active: boolean;
-}
 
 interface FilterOptions {
   categories: string[];
@@ -48,70 +36,44 @@ const Products = () => {
     inStockOnly: false,
   });
 
-  // Create a normalize function that can be reused
   const normalizeCategory = (category: string) => {
     return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
   };
 
   useEffect(() => {
     fetchProducts();
-
-    // Set up real-time subscription for product changes
-    const channel = supabase
-      .channel('products-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'products'
-        },
-        (payload) => {
-          console.log('Product change detected:', payload);
-          // Refetch products when any product changes
-          fetchProducts();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   const fetchProducts = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-
-    if (error) {
+    try {
+      const data = await DatabaseService.getProducts({ isActive: true });
+      
+      // Transform MongoDB products to match the expected Product interface
+      const transformedProducts: Product[] = data.map((dbProduct: any) => ({
+        id: dbProduct._id.toString(),
+        name: dbProduct.name,
+        price: dbProduct.price,
+        image: dbProduct.imageUrl || '/placeholder.svg',
+        category: dbProduct.category as Product['category'],
+        description: dbProduct.description || '',
+        popularity: Math.floor(Math.random() * 100),
+        isNew: Math.random() > 0.7, // 30% chance of being new
+        stockQuantity: dbProduct.stockQuantity,
+        inStock: dbProduct.stockQuantity > 0,
+      }));
+      
+      setProducts(transformedProducts);
+    } catch (error) {
       console.error('Error fetching products:', error);
       toast({
         title: "Error loading products",
         description: "Failed to load products from database",
         variant: "destructive",
       });
-    } else {
-      // Transform database products to match the expected Product interface
-      const transformedProducts: Product[] = (data || []).map((dbProduct: DatabaseProduct) => ({
-        id: dbProduct.id,
-        name: dbProduct.name,
-        price: dbProduct.price,
-        image: dbProduct.image_url || '/placeholder.svg',
-        category: dbProduct.category as Product['category'],
-        description: dbProduct.description || '',
-        popularity: Math.floor(Math.random() * 100),
-        isNew: Math.random() > 0.7, // 30% chance of being new
-        stockQuantity: dbProduct.stock_quantity,
-        inStock: dbProduct.stock_quantity > 0,
-      }));
-      
-      setProducts(transformedProducts);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Calculate product counts by category with case-insensitive matching

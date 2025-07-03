@@ -12,7 +12,7 @@ import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { DatabaseService } from '@/services/database';
 import { useNavigate } from 'react-router-dom';
 
 const BookAppointment = () => {
@@ -46,13 +46,13 @@ const BookAppointment = () => {
   const sendToBackend = async (appointmentData) => {
     try {
       const backendData = {
-        name: appointmentData.customer_name,
-        email: appointmentData.customer_email,
-        phone: appointmentData.customer_phone,
-        date: appointmentData.appointment_date,
+        name: appointmentData.customerName,
+        email: appointmentData.customerEmail,
+        phone: appointmentData.customerPhone,
+        date: appointmentData.appointmentDate,
         time: selectedTime,
         notes: appointmentData.notes || '',
-        cartItems: appointmentData.cart_items.map(item => ({
+        cartItems: appointmentData.cartItems.map(item => ({
           id: item.id,
           name: item.name,
           image: item.image,
@@ -118,38 +118,32 @@ const BookAppointment = () => {
       appointmentDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
       const appointmentData = {
-        user_id: user.id,
-        appointment_date: appointmentDateTime.toISOString(),
-        customer_name: formData.name,
-        customer_email: formData.email,
-        customer_phone: formData.phone,
+        userId: user._id,
+        appointmentDate: appointmentDateTime,
+        customerName: formData.name,
+        customerEmail: formData.email,
+        customerPhone: formData.phone,
         notes: formData.notes,
-        cart_items: state.items.map(item => ({
+        cartItems: state.items.map(item => ({
           id: item.id,
           name: item.name,
           image: item.image,
           price: item.price,
           quantity: item.quantity
         })),
-        total_amount: state.total,
-        status: 'pending'
+        totalAmount: state.total,
       };
 
       console.log('Creating appointment with data:', appointmentData);
 
-      // 1. Save appointment to Supabase (existing functionality)
-      const { data: supabaseData, error: supabaseError } = await supabase
-        .from('appointments')
-        .insert(appointmentData)
-        .select()
-        .single();
+      // 1. Save appointment to MongoDB (existing functionality)
+      const mongoData = await DatabaseService.createAppointment(appointmentData);
 
-      if (supabaseError) {
-        console.error('Error saving to Supabase:', supabaseError);
+      if (!mongoData) {
         throw new Error('Failed to save appointment to database');
       }
 
-      console.log('Supabase save successful:', supabaseData);
+      console.log('MongoDB save successful:', mongoData);
 
       // 2. Send data to your Node.js backend (new functionality)
       try {
