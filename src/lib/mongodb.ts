@@ -34,7 +34,13 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
       socketTimeoutMS: 45000,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI, opts);
+    try {
+      cached.promise = mongoose.connect(MONGODB_URI, opts);
+    } catch (error) {
+      cached.promise = null;
+      console.error('MongoDB connection error:', error);
+      throw error;
+    }
   }
 
   try {

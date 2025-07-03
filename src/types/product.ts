@@ -3,7 +3,7 @@ export interface Product {
   name: string;
   price: number;
   image: string;
-  category: 'rings' | 'necklaces' | 'earrings' | 'bracelets';
+  category: 'rings' | 'necklaces' | 'earrings' | 'bracelets' | 'pendants' | 'chains' | 'watches' | 'accessories';
   description: string;
   popularity: number;
   isNew?: boolean;

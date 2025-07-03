@@ -1,25 +1,36 @@
 import { AuthResponse, AuthUser, CartItem } from '@/types/database';
+import connectToDatabase from '@/lib/mongodb';
+import User from '@/models/User';
+import Product from '@/models/Product';
+import Appointment from '@/models/Appointment';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
 
 export class DatabaseService {
-  private static baseUrl = '/api'; // This would be your backend API URL
-
-  // Helper method for making API requests
-  private static async makeRequest(endpoint: string, options: RequestInit = {}) {
-    const url = `${this.baseUrl}${endpoint}`;
-    const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Network error' }));
-      throw new Error(error.message || 'Request failed');
+  // Initialize database connection
+  static async init() {
+    try {
+      await connectToDatabase();
+      await this.seedInitialData();
+    } catch (error) {
+      console.error('Database initialization failed:', error);
     }
+  }
 
-    return response.json();
+  // Helper method to generate JWT token
+  private static generateToken(userId: string): string {
+    return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '7d' });
+  }
+
+  // Helper method to verify JWT token
+  private static verifyToken(token: string): { userId: string } | null {
+    try {
+      return jwt.verify(token, JWT_SECRET) as { userId: string };
+    } catch (error) {
+      return null;
+    }
   }
 
   // Auth Methods
@@ -30,35 +41,128 @@ export class DatabaseService {
     lastName?: string;
     username?: string;
   }): Promise<AuthResponse> {
-    return this.makeRequest('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(userData),
-    });
+    try {
+      await connectToDatabase();
+
+      // Check if user already exists
+      const existingUser = await User.findOne({
+        $or: [
+          { email: userData.email },
+          ...(userData.username ? [{ username: userData.username }] : [])
+        ]
+      });
+
+      if (existingUser) {
+        throw new Error('User with this email or username already exists');
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(userData.password, 12);
+
+      // Create user
+      const user = new User({
+        email: userData.email,
+        password: hashedPassword,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        username: userData.username,
+        isAdmin: false,
+      });
+
+      await user.save();
+
+      // Generate token
+      const token = this.generateToken(user._id.toString());
+
+      // Return user data without password
+      const userResponse: AuthUser = {
+        _id: user._id.toString(),
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        phone: user.phone,
+        isAdmin: user.isAdmin,
+      };
+
+      return { user: userResponse, token };
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'Failed to create user');
+    }
   }
 
   static async signIn(emailOrUsername: string, password: string): Promise<AuthResponse> {
-    return this.makeRequest('/auth/signin', {
-      method: 'POST',
-      body: JSON.stringify({ emailOrUsername, password }),
-    });
+    try {
+      await connectToDatabase();
+
+      // Find user by email or username
+      const user = await User.findOne({
+        $or: [
+          { email: emailOrUsername },
+          { username: emailOrUsername }
+        ]
+      });
+
+      if (!user) {
+        throw new Error('Invalid credentials');
+      }
+
+      // Verify password
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        throw new Error('Invalid credentials');
+      }
+
+      // Generate token
+      const token = this.generateToken(user._id.toString());
+
+      // Return user data without password
+      const userResponse: AuthUser = {
+        _id: user._id.toString(),
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        phone: user.phone,
+        isAdmin: user.isAdmin,
+      };
+
+      return { user: userResponse, token };
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'Failed to sign in');
+    }
   }
 
   static async getUserById(userId: string): Promise<AuthUser | null> {
     try {
-      return await this.makeRequest(`/users/${userId}`);
+      await connectToDatabase();
+      const user = await User.findById(userId).select('-password');
+      
+      if (!user) return null;
+
+      return {
+        _id: user._id.toString(),
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        phone: user.phone,
+        isAdmin: user.isAdmin,
+      };
     } catch (error) {
+      console.error('Error fetching user:', error);
       return null;
     }
   }
 
   static async verifyToken(token: string): Promise<AuthUser | null> {
     try {
-      return await this.makeRequest('/auth/verify', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const decoded = this.verifyToken(token);
+      if (!decoded) return null;
+
+      return await this.getUserById(decoded.userId);
     } catch (error) {
+      console.error('Error verifying token:', error);
       return null;
     }
   }
@@ -71,22 +175,37 @@ export class DatabaseService {
     minPrice?: number;
     maxPrice?: number;
   }) {
-    const queryParams = new URLSearchParams();
-    
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined) {
-          queryParams.append(key, value.toString());
+    try {
+      await connectToDatabase();
+      
+      const query: any = {};
+      
+      if (filters) {
+        if (filters.category) query.category = filters.category;
+        if (filters.isActive !== undefined) query.isActive = filters.isActive;
+        if (filters.isFeatured !== undefined) query.isFeatured = filters.isFeatured;
+        if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+          query.price = {};
+          if (filters.minPrice !== undefined) query.price.$gte = filters.minPrice;
+          if (filters.maxPrice !== undefined) query.price.$lte = filters.maxPrice;
         }
-      });
-    }
+      }
 
-    const endpoint = `/products${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-    return this.makeRequest(endpoint);
+      return await Product.find(query).sort({ createdAt: -1 });
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      throw new Error('Failed to fetch products');
+    }
   }
 
   static async getProductById(productId: string) {
-    return this.makeRequest(`/products/${productId}`);
+    try {
+      await connectToDatabase();
+      return await Product.findById(productId);
+    } catch (error) {
+      console.error('Error fetching product:', error);
+      throw new Error('Failed to fetch product');
+    }
   }
 
   static async createProduct(productData: {
@@ -99,23 +218,40 @@ export class DatabaseService {
     isActive?: boolean;
     isFeatured?: boolean;
   }) {
-    return this.makeRequest('/products', {
-      method: 'POST',
-      body: JSON.stringify(productData),
-    });
+    try {
+      await connectToDatabase();
+      
+      const product = new Product({
+        ...productData,
+        isActive: productData.isActive ?? true,
+        isFeatured: productData.isFeatured ?? false,
+      });
+
+      return await product.save();
+    } catch (error) {
+      console.error('Error creating product:', error);
+      throw new Error('Failed to create product');
+    }
   }
 
   static async updateProduct(productId: string, updateData: any) {
-    return this.makeRequest(`/products/${productId}`, {
-      method: 'PUT',
-      body: JSON.stringify(updateData),
-    });
+    try {
+      await connectToDatabase();
+      return await Product.findByIdAndUpdate(productId, updateData, { new: true });
+    } catch (error) {
+      console.error('Error updating product:', error);
+      throw new Error('Failed to update product');
+    }
   }
 
   static async deleteProduct(productId: string) {
-    return this.makeRequest(`/products/${productId}`, {
-      method: 'DELETE',
-    });
+    try {
+      await connectToDatabase();
+      return await Product.findByIdAndDelete(productId);
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      throw new Error('Failed to delete product');
+    }
   }
 
   // Appointment Methods
@@ -129,35 +265,149 @@ export class DatabaseService {
     cartItems: CartItem[];
     totalAmount: number;
   }) {
-    return this.makeRequest('/appointments', {
-      method: 'POST',
-      body: JSON.stringify(appointmentData),
-    });
+    try {
+      await connectToDatabase();
+      
+      const appointment = new Appointment({
+        userId: appointmentData.userId,
+        appointmentDate: appointmentData.appointmentDate,
+        customerName: appointmentData.customerName,
+        customerEmail: appointmentData.customerEmail,
+        customerPhone: appointmentData.customerPhone,
+        notes: appointmentData.notes,
+        cartItems: appointmentData.cartItems,
+        totalAmount: appointmentData.totalAmount,
+        status: 'pending',
+      });
+
+      return await appointment.save();
+    } catch (error) {
+      console.error('Error creating appointment:', error);
+      throw new Error('Failed to create appointment');
+    }
   }
 
   static async getAppointmentsByUserId(userId: string) {
-    return this.makeRequest(`/appointments/user/${userId}`);
+    try {
+      await connectToDatabase();
+      return await Appointment.find({ userId }).sort({ appointmentDate: -1 });
+    } catch (error) {
+      console.error('Error fetching user appointments:', error);
+      throw new Error('Failed to fetch appointments');
+    }
   }
 
   static async getAllAppointments() {
-    return this.makeRequest('/appointments');
+    try {
+      await connectToDatabase();
+      return await Appointment.find().sort({ appointmentDate: -1 }).populate('userId', 'email firstName lastName');
+    } catch (error) {
+      console.error('Error fetching all appointments:', error);
+      throw new Error('Failed to fetch appointments');
+    }
   }
 
   static async updateAppointmentStatus(appointmentId: string, status: string) {
-    return this.makeRequest(`/appointments/${appointmentId}/status`, {
-      method: 'PUT',
-      body: JSON.stringify({ status }),
-    });
+    try {
+      await connectToDatabase();
+      return await Appointment.findByIdAndUpdate(
+        appointmentId, 
+        { status }, 
+        { new: true }
+      );
+    } catch (error) {
+      console.error('Error updating appointment status:', error);
+      throw new Error('Failed to update appointment status');
+    }
   }
 
   static async getAppointmentById(appointmentId: string) {
-    return this.makeRequest(`/appointments/${appointmentId}`);
+    try {
+      await connectToDatabase();
+      return await Appointment.findById(appointmentId).populate('userId', 'email firstName lastName');
+    } catch (error) {
+      console.error('Error fetching appointment:', error);
+      throw new Error('Failed to fetch appointment');
+    }
   }
 
-  // Mock data for development (remove when backend is ready)
+  // Seed initial data
   static async seedInitialData() {
-    // This method is now empty since seeding should be handled by the backend
-    // The backend should handle initial data seeding when it starts up
-    console.log('Data seeding should be handled by the backend API');
+    try {
+      await connectToDatabase();
+
+      // Check if admin user exists
+      const adminExists = await User.findOne({ email: 'admin@zaffira.com' });
+      
+      if (!adminExists) {
+        const hashedPassword = await bcrypt.hash('admin123', 12);
+        
+        const adminUser = new User({
+          email: 'admin@zaffira.com',
+          password: hashedPassword,
+          firstName: 'Admin',
+          lastName: 'User',
+          username: 'admin',
+          isAdmin: true,
+        });
+
+        await adminUser.save();
+        console.log('Admin user created successfully');
+      }
+
+      // Check if products exist
+      const productCount = await Product.countDocuments();
+      
+      if (productCount === 0) {
+        const sampleProducts = [
+          {
+            name: 'Diamond Solitaire Ring',
+            description: 'Elegant diamond solitaire ring with 18k gold band',
+            price: 45000,
+            category: 'rings',
+            imageUrl: 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
+            stockQuantity: 10,
+            isActive: true,
+            isFeatured: true,
+          },
+          {
+            name: 'Pearl Necklace',
+            description: 'Classic pearl necklace with sterling silver clasp',
+            price: 25000,
+            category: 'necklaces',
+            imageUrl: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
+            stockQuantity: 15,
+            isActive: true,
+            isFeatured: true,
+          },
+          {
+            name: 'Gold Hoop Earrings',
+            description: 'Stylish gold hoop earrings for everyday wear',
+            price: 15000,
+            category: 'earrings',
+            imageUrl: 'https://images.unsplash.com/photo-1611652022419-a9419f74343d?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
+            stockQuantity: 20,
+            isActive: true,
+            isFeatured: false,
+          },
+          {
+            name: 'Tennis Bracelet',
+            description: 'Sparkling tennis bracelet with cubic zirconia',
+            price: 35000,
+            category: 'bracelets',
+            imageUrl: 'https://images.unsplash.com/photo-1573408301185-9146fe634ad0?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
+            stockQuantity: 8,
+            isActive: true,
+            isFeatured: true,
+          },
+        ];
+
+        await Product.insertMany(sampleProducts);
+        console.log('Sample products created successfully');
+      }
+
+    } catch (error) {
+      console.error('Error seeding initial data:', error);
+    }
   }
 }

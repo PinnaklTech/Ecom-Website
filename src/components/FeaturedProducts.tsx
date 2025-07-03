@@ -25,7 +25,7 @@ const FeaturedProducts = () => {
         id: dbProduct._id.toString(),
         name: dbProduct.name,
         price: dbProduct.price,
-        image: dbProduct.imageUrl || '/placeholder.svg',
+        image: dbProduct.imageUrl || 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80',
         category: dbProduct.category as Product['category'],
         description: dbProduct.description || '',
         popularity: Math.floor(Math.random() * 100), // Random popularity since it's not in DB

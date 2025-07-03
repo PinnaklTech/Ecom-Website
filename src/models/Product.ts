@@ -32,6 +32,7 @@ const ProductSchema: Schema = new Schema({
     type: String,
     required: true,
     enum: ['rings', 'necklaces', 'earrings', 'bracelets', 'pendants', 'chains', 'watches', 'accessories'],
+    lowercase: true,
   },
   imageUrl: {
     type: String,
