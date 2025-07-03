@@ -1,0 +1,14 @@
+
+User-agent: *
+Allow: /
+
+# Disallow admin and private pages
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /auth
+
+# Sitemap
+Sitemap: https://zaffira.jewelry/sitemap.xml
+
+# Crawl delay
+Crawl-delay: 1
